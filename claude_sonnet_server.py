@@ -121,13 +121,18 @@ def index():
     base = request.host_url.rstrip("/")
     return jsonify({
         "name":    "Claude Overchat API Server",
-        "version": "1.1",
+        "version": "1.2",
         "model":   MODEL,
         "endpoints": {
             "POST /chat": {
-                "description": "Send a message and get a reply",
+                "description": "Send a message and get a reply (simple format)",
                 "body":    {"message": "your text here", "chat_id": "(optional)"},
                 "example": f"curl -X POST {base}/chat -H 'Content-Type: application/json' -d '{{\"message\": \"Hello\"}}'",
+            },
+            "POST /v1/chat/completions": {
+                "description": "OpenAI-compatible chat completions endpoint",
+                "body":    {"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
+                "example": f"curl -X POST {base}/v1/chat/completions -H 'Content-Type: application/json' -d '{{\"model\": \"gpt-4\", \"messages\": [{{\"role\": \"user\", \"content\": \"Hello\"}}]}}'",
             },
             "GET /health": "Health check",
         },
@@ -141,10 +146,9 @@ def health():
 
 
 @app.route("/chat", methods=["POST"])
-@app.route("/v1/chat/completions", methods=["POST"])
 def chat():
     """
-    Main chat endpoint.
+    Simple chat endpoint (legacy format).
     Body: { "message": "...", "chat_id": "(optional uuid to continue a conversation)" }
     """
     data = request.get_json(silent=True)
@@ -189,6 +193,96 @@ def chat():
         "message":       reply,
         "chat_id":       chat_id,
         "response_time": f"{elapsed:.2f}s",
+    })
+
+
+@app.route("/v1/chat/completions", methods=["POST"])
+def openai_chat_completions():
+    """
+    OpenAI-compatible chat completions endpoint.
+    Body: { "model": "...", "messages": [...], "stream": false, ... }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": {"message": "Invalid JSON body", "type": "invalid_request_error"}}), 400
+
+    # Extract messages from OpenAI format
+    messages = data.get("messages", [])
+    if not messages:
+        return jsonify({"error": {"message": "Missing 'messages' in request body", "type": "invalid_request_error"}}), 400
+
+    # Get the last user message
+    user_message = None
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            user_message = msg.get("content", "").strip()
+            break
+
+    if not user_message:
+        return jsonify({"error": {"message": "No user message found in messages array", "type": "invalid_request_error"}}), 400
+
+    # Optional: use conversation ID if provided
+    chat_id = data.get("chat_id") or None
+
+    start = time.time()
+    try:
+        chat_id, reply, status, err = send_message(user_message, chat_id)
+    except requests.exceptions.Timeout:
+        return jsonify({
+            "error": {
+                "message": "Request to overchat.ai timed out",
+                "type": "timeout_error"
+            }
+        }), 504
+    except Exception as exc:
+        return jsonify({
+            "error": {
+                "message": "Internal server error",
+                "type": "internal_error",
+                "detail": str(exc)
+            }
+        }), 500
+
+    elapsed = time.time() - start
+
+    if status not in (200, 201):
+        return jsonify({
+            "error": {
+                "message": f"Upstream API returned HTTP {status}",
+                "type": "api_error",
+                "details": err
+            }
+        }), 502
+
+    if not reply:
+        return jsonify({
+            "error": {
+                "message": "Empty reply from upstream API",
+                "type": "api_error"
+            }
+        }), 502
+
+    # Return OpenAI-compatible response
+    return jsonify({
+        "id": f"chatcmpl-{chat_id}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": data.get("model", MODEL),
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": reply
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": len(user_message.split()),
+            "completion_tokens": len(reply.split()),
+            "total_tokens": len(user_message.split()) + len(reply.split())
+        }
     })
 
 
