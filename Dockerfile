@@ -13,4 +13,4 @@ COPY . .
 EXPOSE 5000
 
 # Pornim Gunicorn specificând fișierul tău
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "claude_sonnet_server:app", "--timeout", "120"]
+CMD ["python", "claude_sonnet_server.py"]
