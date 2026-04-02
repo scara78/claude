@@ -1,16 +1,10 @@
+# Dockerfile final corectat
 FROM python:3.11-slim
-
 WORKDIR /app
-
-# Copiem dependințele
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiem tot codul, inclusiv claude_sonnet_server.py
 COPY . .
-
-# Expunem portul
 EXPOSE 5000
 
-# Pornim Gunicorn specificând fișierul tău
-CMD ["python", "claude_sonnet_server.py"]
+# Folosim gthread pentru a permite operațiuni I/O lungi (cererea către Claude)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "claude_sonnet_server:app", "--workers", "1", "--threads", "4", "--timeout", "120"]
