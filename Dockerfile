@@ -2,18 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copiem fișierul de dependențe
+# Copiem dependințele
 COPY requirements.txt .
-
-# Instalăm bibliotecile
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiem restul codului (app.py)
+# Copiem tot codul, inclusiv claude_sonnet_server.py
 COPY . .
 
-# Expunem portul Flask
+# Expunem portul
 EXPOSE 5000
 
-# Pornim serverul cu Gunicorn
-# "app:app" înseamnă: fișierul app.py, variabila app = Flask(__name__)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app", "--timeout", "120", "--workers", "2"]
+# Pornim Gunicorn specificând fișierul tău
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "claude_sonnet_server:app", "--timeout", "120"]
